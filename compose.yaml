@@ -1,0 +1,85 @@
+version: '3'
+services:
+  symfony: &symfony-template
+      image: ${COMPOSE_PROJECT_NAME}-symfony:latest
+      build:
+        context: .
+        args:
+          BUILD_ARGUMENT_ENV: dev
+          HOST_UID: ${HOST_UID:-1000}
+          HOST_GID: ${HOST_GID:-1000}
+          XDEBUG_CONFIG: ${XDEBUG_CONFIG}
+          XDEBUG_VERSION: ${XDEBUG_VERSION}
+        dockerfile: ./Dockerfile
+      container_name: ${COMPOSE_PROJECT_NAME}-symfony
+      ports:
+        - "${WEB_PORT_HTTP}:80"
+        - "${WEB_PORT_SSL}:443"
+      volumes:
+        - ./:/var/www/html:cached
+      depends_on:
+        - mysql
+        - mail
+      networks:
+        - symfony
+
+  mysql:
+      image: mysql:${MYSQL_VERSION}
+      platform: linux/x86_64
+      container_name: ${COMPOSE_PROJECT_NAME}-mysql
+      command: --innodb-use-native-aio=${INNODB_USE_NATIVE_AIO:-1} --sql_mode=${SQL_MODE:-"ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"}
+      environment:
+        MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-secret}
+        MYSQL_DATABASE: symfony
+      ports:
+        - "33061:3306"
+      volumes:
+        - ./var/mysql-data:/var/lib/mysql:delegated
+        - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+      networks:
+        - symfony
+      healthcheck:
+          test: ["CMD-SHELL", "mysqladmin ping -h localhost"]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+
+  phpmyadmin:
+    container_name: phpmyadmin
+    image: phpmyadmin/phpmyadmin
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-secret}
+      PMA_HOST: ${COMPOSE_PROJECT_NAME}-mysql
+      PMA_PORT: 3306
+      PMA_ARBITRARY: 1
+    restart: always
+    ports:
+      - 8081:80
+    depends_on:
+      - mysql
+    networks:
+      - symfony
+    volumes:
+      - ./docker/phpmyadmin:/var/lib/phpmyadmin 
+
+  mail:
+      image: axllent/mailpit:latest
+      container_name: ${COMPOSE_PROJECT_NAME}-mail
+      restart: always
+      healthcheck:
+          test: ["CMD", "curl", "-f", "http://localhost:8025"]
+          interval: 30s
+          timeout: 10s
+          retries: 5
+      ports:
+        - "8025:8025"
+        - "1025:1025"
+      networks:
+        - symfony
+
+volumes:
+  database_volume:
+
+networks:
+  symfony:
+    name: symfony
